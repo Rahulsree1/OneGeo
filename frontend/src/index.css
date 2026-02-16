@@ -1,0 +1,6 @@
+@import "tailwindcss";
+
+/* Use same font stack across app (Dashboard + File Manager) */
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
