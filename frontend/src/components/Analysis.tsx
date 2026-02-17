@@ -45,6 +45,8 @@ export default function Analysis({ wellId, wellName }: AnalysisProps) {
   const [loadingChart, setLoadingChart] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [curveSearch, setCurveSearch] = useState("");
+  /** Per-curve scale: auto (use data min/max) or manual min/max */
+  const [curveScales, setCurveScales] = useState<Record<string, { auto: boolean; min: number; max: number }>>({});
 
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(1);
@@ -77,6 +79,15 @@ export default function Analysis({ wellId, wellName }: AnalysisProps) {
         setChartData(data);
         setZoom(1);
         setPan({ x: 0, y: 0 });
+        const next: Record<string, { auto: boolean; min: number; max: number }> = {};
+        selectedCurves.forEach((name) => {
+          const vals = data[name];
+          const valid = vals ? (vals.filter((v) => v != null && Number.isFinite(v)) as number[]) : [];
+          const dataMin = valid.length ? Math.min(...valid) : 0;
+          const dataMax = valid.length ? Math.max(...valid) : 1;
+          next[name] = { auto: true, min: dataMin, max: dataMax };
+        });
+        setCurveScales(next);
       })
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to load data"))
       .finally(() => setLoadingChart(false));
@@ -127,6 +138,13 @@ export default function Analysis({ wellId, wellName }: AnalysisProps) {
   const resetView = useCallback(() => {
     setZoom(1);
     setPan({ x: 0, y: 0 });
+  }, []);
+
+  const setCurveScale = useCallback((name: string, patch: Partial<{ auto: boolean; min: number; max: number }>) => {
+    setCurveScales((prev) => {
+      const cur = prev[name] ?? { auto: true, min: 0, max: 1 };
+      return { ...prev, [name]: { ...cur, ...patch } };
+    });
   }, []);
 
   const err = error || wellError;
@@ -203,6 +221,7 @@ export default function Analysis({ wellId, wellName }: AnalysisProps) {
               <WellLogChart
                 data={chartData}
                 curveNames={selectedCurves}
+                curveScales={curveScales}
                 zoom={zoom}
                 pan={pan}
               />
@@ -234,7 +253,7 @@ export default function Analysis({ wellId, wellName }: AnalysisProps) {
                   title="Search curve names"
                 />
               </div>
-              <div className="flex flex-col gap-1.5 max-h-80 overflow-y-auto">
+              <div className="flex flex-col gap-1.5 max-h-35 overflow-y-auto">
                 {filteredCurveNames.length === 0 ? (
                   <p className="text-slate-400 text-xs py-1">No curves match</p>
                 ) : (
@@ -286,6 +305,61 @@ export default function Analysis({ wellId, wellName }: AnalysisProps) {
               {loadingChart ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
               Load chart
             </button>
+            {chartData && selectedCurves.length > 0 && (
+              <div className="border-t border-slate-200 pt-4 mt-4">
+                <h4 className="text-xs font-semibold text-slate-600 mb-2" title="Set min/max scale per curve">
+                  Scale per curve
+                </h4>
+                <div className="space-y-3 max-h-48 overflow-y-auto">
+                  {selectedCurves.map((name) => {
+                    const scale = curveScales[name] ?? { auto: true, min: 0, max: 1 };
+                    return (
+                      <div key={name} className="rounded border border-slate-200 p-2 bg-slate-50/80">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <input
+                            type="checkbox"
+                            id={`scale-auto-${name}`}
+                            checked={scale.auto}
+                            onChange={(e) => setCurveScale(name, { auto: e.target.checked })}
+                            className="rounded border-slate-300"
+                            title="Auto scale from data"
+                          />
+                          <label htmlFor={`scale-auto-${name}`} className="text-xs font-medium text-slate-700 truncate flex-1">
+                            {name}
+                          </label>
+                        </div>
+                        <div className="flex gap-1.5">
+                          <div className="flex-1">
+                            <label className="sr-only">Min</label>
+                            <input
+                              type="number"
+                              value={scale.min}
+                              onChange={(e) => setCurveScale(name, { min: parseFloat(e.target.value) || 0 })}
+                              disabled={scale.auto}
+                              step="any"
+                              className="w-full px-1.5 py-1 border border-slate-300 rounded text-xs disabled:bg-slate-100 disabled:text-slate-400"
+                              title={`Min value for ${name}`}
+                            />
+                          </div>
+                          <div className="flex-1">
+                            <label className="sr-only">Max</label>
+                            <input
+                              type="number"
+                              value={scale.max}
+                              onChange={(e) => setCurveScale(name, { max: parseFloat(e.target.value) || 1 })}
+                              disabled={scale.auto}
+                              step="any"
+                              className="w-full px-1.5 py-1 border border-slate-300 rounded text-xs disabled:bg-slate-100 disabled:text-slate-400"
+                              title={`Max value for ${name}`}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
           {err && <p className="text-red-600 text-sm mt-2">{err}</p>}
         </div>
@@ -297,11 +371,12 @@ export default function Analysis({ wellId, wellName }: AnalysisProps) {
 interface WellLogChartProps {
   data: { depth: number[]; [key: string]: number[] };
   curveNames: string[];
+  curveScales: Record<string, { auto: boolean; min: number; max: number }>;
   zoom: number;
   pan: { x: number; y: number };
 }
 
-function WellLogChart({ data, curveNames, zoom, pan }: WellLogChartProps) {
+function WellLogChart({ data, curveNames, curveScales, zoom, pan }: WellLogChartProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [size, setSize] = useState({ w: 800, h: 500 });
   const padding = { top: 20, right: 20, bottom: 40, left: 60 };
@@ -335,8 +410,12 @@ function WellLogChart({ data, curveNames, zoom, pan }: WellLogChartProps) {
   const curvesWithScales = curveNames.map((name, i) => {
     const vals = data[name];
     const valid = vals ? (vals.filter((v) => v != null && Number.isFinite(v)) as number[]) : [];
-    const min = valid.length ? Math.min(...valid) : 0;
-    const max = valid.length ? Math.max(...valid) : 1;
+    const dataMin = valid.length ? Math.min(...valid) : 0;
+    const dataMax = valid.length ? Math.max(...valid) : 1;
+    const scaleCfg = curveScales[name];
+    const useManual = scaleCfg && !scaleCfg.auto;
+    const min = useManual ? scaleCfg.min : dataMin;
+    const max = useManual ? scaleCfg.max : dataMax;
     const range = max - min || 1;
     const trackLeft = padding.left + i * trackW;
     const xScale = (v: number) => trackLeft + ((v - min) / range) * trackW;

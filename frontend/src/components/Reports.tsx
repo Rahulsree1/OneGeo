@@ -7,6 +7,24 @@ import { TabLoaderFull, TabLoaderOverlay } from "./TabLoader";
 import { jsPDF } from "jspdf";
 import * as XLSX from "xlsx";
 
+/** Logo for PDF header: use public logo if available (index.html references /logo.png) */
+const PDF_LOGO_URL = typeof window !== "undefined" ? `${window.location.origin}/logo.png` : "";
+
+/** Load image from URL as base64 data URL for jsPDF */
+function loadImageAsDataUrl(url: string): Promise<string> {
+  return fetch(url)
+    .then((r) => r.blob())
+    .then(
+      (blob) =>
+        new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        })
+    );
+}
+
 interface ReportsProps {
   wellId: number;
   wellName: string;
@@ -89,7 +107,7 @@ export default function Reports({ wellId, wellName, fileName }: ReportsProps) {
   }, [wellId, wellName, selectedCurves, depthMin, depthMax, includeAI]);
 
   const handlePrint = useCallback(() => {
-    if (!reportRef.current) return;
+    if (!reportRef.current || !report) return;
     const printContent = reportRef.current.innerHTML;
     const printWindow = window.open("", "_blank");
     if (!printWindow) {
@@ -98,22 +116,34 @@ export default function Reports({ wellId, wellName, fileName }: ReportsProps) {
     }
     printWindow.document.write(`
       <!DOCTYPE html>
-      <html>
+      <html lang="en">
         <head>
-          <title>Report – ${wellName}</title>
+          <meta charset="utf-8">
+          <title>Report – ${wellName} | ONE GEO</title>
           <style>
-            body { font-family: system-ui, sans-serif; padding: 24px; max-width: 800px; margin: 0 auto; color: #1e293b; }
-            h1 { font-size: 1.25rem; margin-bottom: 0.5rem; }
-            h2 { font-size: 0.875rem; font-weight: 600; color: #475569; margin-top: 1.5rem; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.05em; }
-            p, li { font-size: 0.875rem; line-height: 1.5; }
-            .meta { font-size: 0.75rem; color: #64748b; margin-bottom: 1.5rem; }
-            .block { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
-            table { width: 100%; font-size: 0.75rem; border-collapse: collapse; }
-            th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e2e8f0; }
-            th { background: #f1f5f9; font-weight: 600; }
+            * { box-sizing: border-box; }
+            body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; padding: 24px 32px; max-width: 800px; margin: 0 auto; color: #1e293b; font-size: 14px; line-height: 1.5; }
+            .report-content { margin: 0; }
+            .report-content > div:first-child { background: linear-gradient(to bottom right, #f8fafc, #f1f5f9); border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+            .report-content h1 { font-size: 1.35rem; font-weight: 700; margin: 0 0 4px 0; color: #0f172a; }
+            .report-content h2 { font-size: 0.7rem; font-weight: 600; color: #475569; margin: 0 0 12px 0; text-transform: uppercase; letter-spacing: 0.06em; }
+            .report-content section { border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin-bottom: 16px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+            .report-content section.bg-amber-50 { background: #fffbeb; border-color: #fde68a; }
+            .report-content section.bg-slate-50 { background: #f8fafc; }
+            .report-content section.bg-indigo-50 { background: #eef2ff; border-color: #c7d2fe; }
+            .report-content ul { margin: 0; padding-left: 20px; }
+            .report-content li { margin-bottom: 6px; }
+            .report-content table { width: 100%; font-size: 12px; border-collapse: collapse; }
+            .report-content th, .report-content td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #e2e8f0; }
+            .report-content th { background: #f1f5f9; font-weight: 600; color: #475569; }
+            .report-content tr:hover { background: #f8fafc; }
+            .report-content p { margin: 0 0 8px 0; }
+            .report-content p:last-child { margin-bottom: 0; }
+            .report-content .text-xs { font-size: 11px; color: #64748b; margin-top: 6px; }
+            @media print { body { padding: 16px; } .report-content section { break-inside: avoid; } }
           </style>
         </head>
-        <body>${printContent}</body>
+        <body><div class="report-content">${printContent}</div></body>
       </html>
     `);
     printWindow.document.close();
@@ -121,94 +151,165 @@ export default function Reports({ wellId, wellName, fileName }: ReportsProps) {
     setTimeout(() => {
       printWindow.print();
       printWindow.close();
-    }, 250);
-  }, [wellName]);
+    }, 300);
+  }, [wellName, report]);
 
   const safeName = (wellName || "report").replace(/[^\w\s-]/g, "").replace(/\s+/g, "_").slice(0, 50);
 
-  const downloadPDF = useCallback(() => {
+  const downloadPDF = useCallback(async () => {
     if (!report) return;
     const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-    const pageW = 210; // A4 width in mm
-    let y = 20;
-    const lineH = 6;
+    const pageW = 210;
     const margin = 20;
+    const contentW = pageW - 2 * margin;
+    let y = 20;
+    const lineH = 5.5;
+    const sectionGap = 6;
 
-    doc.setFontSize(14);
-    doc.text(wellName, margin, y);
-    y += lineH;
-    doc.setFontSize(10);
-    doc.setTextColor(100, 100, 100);
-    if (fileName) doc.text(`File: ${fileName}`, margin, y);
-    y += lineH;
-    doc.text(`Generated: ${report.generatedAt}`, margin, y);
-    y += lineH + 4;
-    doc.setTextColor(0, 0, 0);
+    const pushPageIfNeeded = (need: number) => {
+      if (y + need > 277) {
+        doc.addPage();
+        y = 20;
+      }
+    };
+
+    if (PDF_LOGO_URL) {
+      try {
+        const logoData = await loadImageAsDataUrl(PDF_LOGO_URL);
+        doc.addImage(logoData, "PNG", margin, 12, 18, 18);
+      } catch {
+        /* logo optional */
+      }
+    }
+    doc.setFontSize(18);
+    doc.setTextColor(15, 23, 42);
+    doc.text("ONE GEO", margin + 22, 20);
+    doc.setFontSize(12);
+    doc.setTextColor(51, 65, 85);
+    doc.text(wellName, margin + 22, 26);
+    doc.setFontSize(9);
+    doc.setTextColor(100, 116, 139);
+    if (fileName) doc.text(`File: ${fileName}`, margin, 34);
+    doc.text(`Generated: ${report.generatedAt}`, margin, 40);
+    y = 48;
+
+    doc.setDrawColor(226, 232, 240);
+    doc.line(margin, y, pageW - margin, y);
+    y += sectionGap;
 
     doc.setFontSize(11);
+    doc.setTextColor(51, 65, 85);
+    doc.setFont("helvetica", "bold");
     doc.text("Parameters", margin, y);
     y += lineH;
+    doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
+    doc.setTextColor(71, 85, 105);
     doc.text(`Curves: ${report.params.curves.join(", ")}`, margin, y);
     y += lineH;
     doc.text(`Depth: ${report.params.depthMin} – ${report.params.depthMax}`, margin, y);
-    y += lineH + 4;
+    y += lineH + sectionGap;
 
+    doc.setFont("helvetica", "bold");
     doc.setFontSize(11);
-    doc.text("Summary", margin, y);
+    doc.text("Key findings", margin, y);
     y += lineH;
+    doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
-    const summaryLines = doc.splitTextToSize(report.statistics.summary, pageW - 2 * margin);
-    doc.text(summaryLines, margin, y);
-    y += summaryLines.length * lineH + 4;
+    if (report.statistics.insights.length > 0) {
+      for (const ins of report.statistics.insights) {
+        pushPageIfNeeded(lineH * 3);
+        const line = `${ins.curve}: ${ins.interpretation}`;
+        const lines = doc.splitTextToSize(line, contentW);
+        doc.text(lines, margin, y);
+        y += lines.length * lineH + 2;
+      }
+      if (report.statistics.anomalies.length > 0) {
+        doc.setTextColor(180, 83, 9);
+        doc.text(`${report.statistics.anomalies.length} anomaly point(s) beyond 2σ.`, margin, y);
+        y += lineH;
+        doc.setTextColor(71, 85, 105);
+      }
+    } else {
+      const summaryLines = doc.splitTextToSize(report.statistics.summary, contentW);
+      doc.text(summaryLines, margin, y);
+      y += summaryLines.length * lineH;
+    }
+    y += sectionGap;
+
+    doc.setFont("helvetica", "bold");
+    doc.text("Statistics summary", margin, y);
+    y += lineH;
+    doc.setFont("helvetica", "normal");
+    const sumLines = doc.splitTextToSize(report.statistics.summary, contentW);
+    doc.text(sumLines, margin, y);
+    y += sumLines.length * lineH + sectionGap;
 
     if (report.statistics.insights.length > 0) {
-      if (y > 250) { doc.addPage(); y = 20; }
-      doc.setFontSize(11);
+      pushPageIfNeeded(lineH * 4);
+      doc.setFont("helvetica", "bold");
       doc.text("Insights by curve", margin, y);
       y += lineH;
-      doc.setFontSize(9);
+      doc.setFont("helvetica", "normal");
       for (const ins of report.statistics.insights) {
-        if (y > 270) { doc.addPage(); y = 20; }
-        doc.text(`${ins.curve}: ${ins.interpretation}`, margin, y);
+        pushPageIfNeeded(lineH * 5);
+        doc.text(ins.curve, margin, y);
         y += lineH;
-        doc.text(`  min=${ins.statistics.min} max=${ins.statistics.max} mean=${ins.statistics.mean} std=${ins.statistics.std} n=${ins.statistics.count}`, margin, y);
+        const interpLines = doc.splitTextToSize(ins.interpretation, contentW);
+        doc.text(interpLines, margin, y);
+        y += interpLines.length * lineH;
+        doc.setFontSize(8);
+        doc.setTextColor(148, 163, 184);
+        doc.text(`min ${ins.statistics.min.toFixed(4)}  max ${ins.statistics.max.toFixed(4)}  mean ${ins.statistics.mean.toFixed(4)}  σ ${ins.statistics.std.toFixed(4)}  n=${ins.statistics.count}`, margin, y);
         y += lineH + 2;
+        doc.setFontSize(9);
+        doc.setTextColor(71, 85, 105);
       }
       y += 2;
     }
 
     if (report.statistics.anomalies.length > 0) {
-      if (y > 240) { doc.addPage(); y = 20; }
+      pushPageIfNeeded(40);
+      doc.setFont("helvetica", "bold");
       doc.setFontSize(11);
+      doc.setTextColor(51, 65, 85);
       doc.text("Anomalies (2σ)", margin, y);
       y += lineH;
+      doc.setFont("helvetica", "normal");
       doc.setFontSize(8);
-      doc.text("Depth", margin, y);
-      doc.text("Curve", margin + 30, y);
-      doc.text("Value", margin + 55, y);
-      doc.text("Mean", margin + 80, y);
-      doc.text("Deviation", margin + 105, y);
+      const colW = [22, 35, 32, 32, 38];
+      let x = margin;
+      ["Depth", "Curve", "Value", "Mean", "Deviation"].forEach((h, i) => {
+        doc.text(h, x, y);
+        x += colW[i];
+      });
       y += lineH;
+      doc.setDrawColor(226, 232, 240);
+      doc.line(margin, y - 2, pageW - margin, y - 2);
       for (const a of report.statistics.anomalies) {
-        if (y > 275) { doc.addPage(); y = 20; }
-        doc.text(String(a.depth.toFixed(2)), margin, y);
-        doc.text(a.curve_name, margin + 30, y);
-        doc.text(String(a.value.toFixed(4)), margin + 55, y);
-        doc.text(String(a.mean.toFixed(4)), margin + 80, y);
-        doc.text(a.deviation, margin + 105, y);
+        pushPageIfNeeded(lineH + 2);
+        x = margin;
+        doc.text(a.depth.toFixed(2), x, y);
+        doc.text(a.curve_name.substring(0, 12), x + colW[0], y);
+        doc.text(a.value.toFixed(4), x + colW[0] + colW[1], y);
+        doc.text(a.mean.toFixed(4), x + colW[0] + colW[1] + colW[2], y);
+        doc.text(a.deviation, x + colW[0] + colW[1] + colW[2] + colW[3], y);
         y += lineH;
       }
-      y += 4;
+      y += sectionGap;
     }
 
     if (report.aiInterpretation) {
-      if (y > 230) { doc.addPage(); y = 20; }
+      pushPageIfNeeded(30);
+      doc.setFont("helvetica", "bold");
       doc.setFontSize(11);
+      doc.setTextColor(67, 56, 202);
       doc.text("AI Interpretation", margin, y);
       y += lineH;
+      doc.setFont("helvetica", "normal");
       doc.setFontSize(9);
-      const aiLines = doc.splitTextToSize(report.aiInterpretation, pageW - 2 * margin);
+      doc.setTextColor(71, 85, 105);
+      const aiLines = doc.splitTextToSize(report.aiInterpretation, contentW);
       doc.text(aiLines, margin, y);
     }
 
@@ -334,114 +435,104 @@ export default function Reports({ wellId, wellName, fileName }: ReportsProps) {
         {generating && (
           <TabLoaderOverlay message="Generating analysis & report..." />
         )}
-        <div className="p-4 bg-white rounded-lg border border-slate-200 shadow-sm flex-1 min-h-0 overflow-y-auto">
-          <h3 className="text-sm font-semibold text-slate-800 mb-3 flex items-center gap-2">
-            <FileText className="w-4 h-4 text-emerald-600" />
-            {wellName} – Analysis & Reports
-          </h3>
+        <div className="p-6 bg-white rounded-xl border border-slate-200 shadow-sm flex-1 min-h-0 overflow-y-auto">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="w-9 h-9 rounded-lg bg-emerald-100 flex items-center justify-center">
+              <FileText className="w-5 h-5 text-emerald-600" />
+            </div>
+            <div>
+              <h3 className="text-base font-semibold text-slate-800">{wellName}</h3>
+              <p className="text-xs text-slate-500">Analysis & Reports</p>
+            </div>
+          </div>
           {report ? (
-            <div ref={reportRef} className="space-y-4 report-content">
-              <div>
-                <h1 className="text-lg font-semibold text-slate-900">
-                  {wellName}
-                </h1>
+            <div ref={reportRef} className="report-content space-y-6">
+              {/* Header block */}
+              <div className="rounded-xl bg-gradient-to-br from-slate-50 to-slate-100/80 border border-slate-200 p-5">
+                <h1 className="text-xl font-bold text-slate-900 tracking-tight">{wellName}</h1>
                 {fileName && (
-                  <p className="text-sm text-slate-500">File: {fileName}</p>
+                  <p className="text-sm text-slate-600 mt-0.5">File: {fileName}</p>
                 )}
-                <p className="meta">Generated: {report.generatedAt}</p>
+                <p className="text-xs text-slate-500 mt-2 font-medium">Generated: {report.generatedAt}</p>
               </div>
 
-              <section>
-                <h2>Parameters</h2>
-                <p className="text-sm text-slate-700">
-                  Curves: {report.params.curves.join(", ")} · Depth range:{" "}
-                  {report.params.depthMin} – {report.params.depthMax}
-                </p>
-              </section>
-
-              {/* Analysis section - key findings from curve interpretations */}
-              <section>
-                <h2>Analysis – Key findings</h2>
-                <div className="block bg-slate-50 border border-slate-200">
-                  {report.statistics.insights.length > 0 ? (
-                    <ul className="list-disc list-inside space-y-1.5 text-sm text-slate-700">
-                      {report.statistics.insights.map((ins) => (
-                        <li key={ins.curve}>
-                          <span className="font-medium text-slate-800">
-                            {ins.curve}:
-                          </span>{" "}
-                          {ins.interpretation}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="text-sm text-slate-600">
-                      {report.statistics.summary}
-                    </p>
-                  )}
-                  {report.statistics.anomalies.length > 0 && (
-                    <p className="text-xs text-amber-700 mt-2">
-                      {report.statistics.anomalies.length} anomaly points
-                      (beyond 2σ) detected in the interval.
-                    </p>
-                  )}
+              {/* Parameters */}
+              <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Parameters</h2>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-700">
+                  <span><strong className="text-slate-800">Curves:</strong> {report.params.curves.join(", ")}</span>
+                  <span><strong className="text-slate-800">Depth:</strong> {report.params.depthMin} – {report.params.depthMax}</span>
                 </div>
               </section>
 
-              <section>
-                <h2>Statistics summary</h2>
-                <div className="block">
-                  <p className="text-sm text-slate-700">
-                    {report.statistics.summary}
-                  </p>
-                </div>
-              </section>
-
-              {report.statistics.insights.length > 0 && (
-                <section>
-                  <h2>Insights by curve (detail)</h2>
+              {/* Executive summary / Key findings */}
+              <section className="rounded-xl border border-slate-200 bg-amber-50/50 p-4 shadow-sm">
+                <h2 className="text-xs font-semibold text-amber-800 uppercase tracking-wider mb-3">Key findings</h2>
+                {report.statistics.insights.length > 0 ? (
                   <ul className="space-y-2">
                     {report.statistics.insights.map((ins) => (
-                      <li key={ins.curve} className="block text-sm">
-                        <span className="font-medium text-slate-800">
-                          {ins.curve}
-                        </span>
-                        <p className="text-slate-600 mt-0.5">
-                          {ins.interpretation}
-                        </p>
-                        <p className="text-slate-400 text-xs mt-0.5">
-                          min={ins.statistics.min} max={ins.statistics.max}{" "}
-                          mean={ins.statistics.mean} std={ins.statistics.std}{" "}
-                          (n={ins.statistics.count})
-                        </p>
+                      <li key={ins.curve} className="text-sm text-slate-700">
+                        <span className="font-semibold text-slate-800">{ins.curve}:</span> {ins.interpretation}
                       </li>
                     ))}
                   </ul>
+                ) : (
+                  <p className="text-sm text-slate-700 leading-relaxed">{report.statistics.summary}</p>
+                )}
+                {report.statistics.anomalies.length > 0 && (
+                  <p className="text-xs text-amber-700 font-medium mt-3">
+                    {report.statistics.anomalies.length} anomaly point(s) beyond 2σ in this interval.
+                  </p>
+                )}
+              </section>
+
+              {/* Statistics summary */}
+              <section className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 shadow-sm">
+                <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Statistics summary</h2>
+                <p className="text-sm text-slate-700 leading-relaxed">{report.statistics.summary}</p>
+              </section>
+
+              {/* Insights by curve */}
+              {report.statistics.insights.length > 0 && (
+                <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Insights by curve</h2>
+                  <div className="space-y-4">
+                    {report.statistics.insights.map((ins) => (
+                      <div key={ins.curve} className="rounded-lg border border-slate-100 bg-slate-50/50 p-3">
+                        <p className="font-semibold text-slate-800 text-sm">{ins.curve}</p>
+                        <p className="text-sm text-slate-600 mt-1 leading-relaxed">{ins.interpretation}</p>
+                        <p className="text-xs text-slate-400 mt-2 font-mono">
+                          min {ins.statistics.min.toFixed(4)} · max {ins.statistics.max.toFixed(4)} · mean {ins.statistics.mean.toFixed(4)} · σ {ins.statistics.std.toFixed(4)} · n={ins.statistics.count}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
                 </section>
               )}
 
+              {/* Anomalies table */}
               {report.statistics.anomalies.length > 0 && (
-                <section>
-                  <h2>Anomalies (2σ)</h2>
-                  <div className="block overflow-x-auto">
-                    <table>
+                <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm overflow-hidden">
+                  <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Anomalies (2σ)</h2>
+                  <div className="overflow-x-auto -mx-1">
+                    <table className="w-full text-sm border-collapse">
                       <thead>
-                        <tr>
-                          <th>Depth</th>
-                          <th>Curve</th>
-                          <th>Value</th>
-                          <th>Mean</th>
-                          <th>Deviation</th>
+                        <tr className="bg-slate-100 text-slate-600 text-left">
+                          <th className="py-2 px-3 font-semibold rounded-tl-lg">Depth</th>
+                          <th className="py-2 px-3 font-semibold">Curve</th>
+                          <th className="py-2 px-3 font-semibold">Value</th>
+                          <th className="py-2 px-3 font-semibold">Mean</th>
+                          <th className="py-2 px-3 font-semibold rounded-tr-lg">Deviation</th>
                         </tr>
                       </thead>
                       <tbody>
                         {report.statistics.anomalies.map((a, i) => (
-                          <tr key={i}>
-                            <td>{a.depth.toFixed(2)}</td>
-                            <td>{a.curve_name}</td>
-                            <td>{a.value.toFixed(4)}</td>
-                            <td>{a.mean.toFixed(4)}</td>
-                            <td>{a.deviation}</td>
+                          <tr key={i} className="border-t border-slate-100 hover:bg-slate-50/50">
+                            <td className="py-2 px-3 text-slate-700 font-mono">{a.depth.toFixed(2)}</td>
+                            <td className="py-2 px-3 text-slate-700">{a.curve_name}</td>
+                            <td className="py-2 px-3 text-slate-700 font-mono">{a.value.toFixed(4)}</td>
+                            <td className="py-2 px-3 text-slate-700 font-mono">{a.mean.toFixed(4)}</td>
+                            <td className="py-2 px-3 text-slate-600 text-xs">{a.deviation}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -450,14 +541,11 @@ export default function Reports({ wellId, wellName, fileName }: ReportsProps) {
                 </section>
               )}
 
+              {/* AI Interpretation */}
               {report.aiInterpretation && (
-                <section>
-                  <h2>AI Interpretation</h2>
-                  <div className="block">
-                    <p className="text-sm text-slate-700 whitespace-pre-wrap">
-                      {report.aiInterpretation}
-                    </p>
-                  </div>
+                <section className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-4 shadow-sm">
+                  <h2 className="text-xs font-semibold text-indigo-700 uppercase tracking-wider mb-3">AI interpretation</h2>
+                  <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{report.aiInterpretation}</p>
                 </section>
               )}
             </div>
@@ -571,49 +659,49 @@ export default function Reports({ wellId, wellName, fileName }: ReportsProps) {
               )}
               {generating ? "Generating…" : "Generate analysis & report"}
             </button>
-            <div className="border-t border-slate-200 pt-3 mt-2">
-              <p className="text-xs font-medium text-slate-500 mb-2">
-                Download
+            <div className="border-t border-slate-200 pt-4 mt-3">
+              <p className="text-xs font-semibold text-slate-600 uppercase tracking-wider mb-3">
+                Export report
               </p>
-              <div className="flex flex-wrap gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  onClick={downloadPDF}
+                  onClick={() => void downloadPDF()}
                   disabled={!report}
-                  title="Download PDF"
-                  className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg text-xs font-medium disabled:opacity-50 flex items-center gap-1.5"
+                  title="Download as PDF (with logo and clean layout)"
+                  className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg text-xs font-medium disabled:opacity-50 flex items-center justify-center gap-1.5 border border-red-100"
                 >
-                  <Download className="w-3.5 h-3.5" />
+                  <Download className="w-4 h-4 shrink-0" />
                   PDF
                 </button>
                 <button
                   type="button"
                   onClick={downloadCSV}
                   disabled={!report}
-                  title="Download CSV"
-                  className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-medium disabled:opacity-50 flex items-center gap-1.5"
+                  title="Download as CSV"
+                  className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-medium disabled:opacity-50 flex items-center justify-center gap-1.5 border border-emerald-100"
                 >
-                  <Download className="w-3.5 h-3.5" />
+                  <Download className="w-4 h-4 shrink-0" />
                   CSV
                 </button>
                 <button
                   type="button"
                   onClick={downloadExcel}
                   disabled={!report}
-                  title="Download Excel"
-                  className="px-3 py-1.5 bg-green-50 hover:bg-green-100 text-green-700 rounded-lg text-xs font-medium disabled:opacity-50 flex items-center gap-1.5"
+                  title="Download as Excel"
+                  className="px-3 py-2 bg-green-50 hover:bg-green-100 text-green-700 rounded-lg text-xs font-medium disabled:opacity-50 flex items-center justify-center gap-1.5 border border-green-100"
                 >
-                  <Download className="w-3.5 h-3.5" />
+                  <Download className="w-4 h-4 shrink-0" />
                   Excel
                 </button>
                 <button
                   type="button"
                   onClick={handlePrint}
                   disabled={!report}
-                  title="Print or Save as PDF"
-                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-medium disabled:opacity-50 flex items-center gap-1.5"
+                  title="Print or save as PDF from browser"
+                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-medium disabled:opacity-50 flex items-center justify-center gap-1.5 border border-slate-200"
                 >
-                  <Printer className="w-3.5 h-3.5" />
+                  <Printer className="w-4 h-4 shrink-0" />
                   Print
                 </button>
               </div>

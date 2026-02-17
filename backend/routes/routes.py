@@ -83,3 +83,8 @@ def ai_interpret():
 @api.route("/ai/interpret-llm", methods=["POST"])
 def ai_interpret_llm():
     return AIController.interpret_llm()
+
+
+@api.route("/ai/chat", methods=["POST"])
+def ai_chat():
+    return AIController.chat()

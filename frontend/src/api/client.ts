@@ -197,3 +197,27 @@ export async function interpretWellLogLLM(
   if (!data.success || !data.data) throw new Error("LLM interpretation failed");
   return data.data;
 }
+
+/** Chat message for chatbot history */
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+/** Chat response from /api/ai/chat */
+export interface ChatResponse {
+  reply: string;
+}
+
+export async function sendChatMessage(
+  message: string,
+  options?: { history?: ChatMessage[]; wellName?: string }
+): Promise<ChatResponse> {
+  const { data } = await api.post<ApiResponse<ChatResponse>>("/api/ai/chat", {
+    message,
+    history: options?.history ?? [],
+    well_name: options?.wellName ?? undefined,
+  });
+  if (!data.success || !data.data) throw new Error("Chat failed");
+  return data.data;
+}

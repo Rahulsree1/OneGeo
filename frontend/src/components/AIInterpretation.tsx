@@ -19,7 +19,6 @@ export default function AIInterpretation({ wellId, wellName }: AIInterpretationP
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<AIInterpretLLMResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showStats, setShowStats] = useState(false);
 
   useEffect(() => {
     if (depthRange) {
@@ -87,41 +86,70 @@ export default function AIInterpretation({ wellId, wellName }: AIInterpretationP
             {wellName} – AI Interpretation (Groq LLM)
           </h3>
           {result ? (
-            <div className="space-y-4">
-              <div>
-                <h4 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1.5">Interpretation</h4>
-                <div className="text-sm text-slate-700 bg-amber-50/50 border border-amber-200/60 rounded-lg p-4 whitespace-pre-wrap leading-relaxed">
+            <div className="space-y-5">
+              <section>
+                <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">AI interpretation</h4>
+                <div className="text-sm text-slate-700 bg-amber-50/60 border border-amber-200/70 rounded-xl p-4 whitespace-pre-wrap leading-relaxed shadow-sm">
                   {result.interpretation}
                 </div>
-              </div>
-              <div>
-                <button
-                  type="button"
-                  onClick={() => setShowStats((s) => !s)}
-                  className="text-xs font-medium text-slate-500 hover:text-slate-700"
-                  title={showStats ? "Hide deterministic statistics" : "Show deterministic statistics used by AI"}
-                >
-                  {showStats ? "Hide" : "Show"} underlying statistics
-                </button>
-                {showStats && result.statistics && (
-                  <div className="mt-2 space-y-2 text-sm text-slate-600 border border-slate-200 rounded-lg p-3">
-                    <p className="font-medium text-slate-700">Summary</p>
-                    <p>{result.statistics.summary}</p>
-                    {result.statistics.insights.length > 0 && (
-                      <>
-                        <p className="font-medium text-slate-700 mt-2">Insights</p>
-                        <ul className="list-disc list-inside space-y-0.5">
-                          {result.statistics.insights.map((ins) => (
-                            <li key={ins.curve}>
-                              {ins.curve}: {ins.interpretation}
-                            </li>
-                          ))}
-                        </ul>
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
+              </section>
+
+              {/* {result.statistics && (
+                <section className="rounded-xl border border-slate-200 bg-slate-50/80 overflow-hidden shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => setShowStats((s) => !s)}
+                    className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-slate-100/80 transition-colors"
+                    title={showStats ? "Hide statistical context" : "Show statistical context used by the AI"}
+                  >
+                    <span className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                      Statistical context (input to AI)
+                    </span>
+                    <span className="text-slate-400 text-xs">{showStats ? "▼ Hide" : "▶ Show"}</span>
+                  </button>
+                  {showStats && (
+                    <div className="px-4 pb-4 pt-0 space-y-4 border-t border-slate-200">
+                      <div>
+                        <p className="text-xs font-medium text-slate-500 mb-1">Summary</p>
+                        <p className="text-sm text-slate-700 leading-relaxed">{result.statistics.summary}</p>
+                      </div>
+                      {result.statistics.insights.length > 0 && (
+                        <div>
+                          <p className="text-xs font-medium text-slate-500 mb-2">Per-curve statistics & insights</p>
+                          <div className="space-y-3">
+                            {result.statistics.insights.map((ins) => (
+                              <div
+                                key={ins.curve}
+                                className="rounded-lg border border-slate-200 bg-white p-3 text-sm"
+                              >
+                                <p className="font-semibold text-slate-800 mb-1.5">{ins.curve}</p>
+                                <p className="text-slate-600 leading-relaxed mb-2">{ins.interpretation}</p>
+                                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs font-mono text-slate-500">
+                                  <span>min {ins.statistics.min.toFixed(4)}</span>
+                                  <span>max {ins.statistics.max.toFixed(4)}</span>
+                                  <span>mean {ins.statistics.mean.toFixed(4)}</span>
+                                  <span>σ {ins.statistics.std.toFixed(4)}</span>
+                                  <span>n = {ins.statistics.count}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {result.statistics.anomalies.length > 0 && (
+                        <div className="rounded-lg border border-amber-200/80 bg-amber-50/50 p-3">
+                          <p className="text-xs font-medium text-amber-800 mb-1">
+                            Anomalies (beyond 2σ): {result.statistics.anomalies.length} point(s)
+                          </p>
+                          <p className="text-xs text-slate-600">
+                            Depth range and curves with outliers are included in the statistical context sent to the AI.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </section>
+              )} */}
             </div>
           ) : !running && !error && (
               <div className="h-full flex items-center justify-center text-slate-400 text-sm">

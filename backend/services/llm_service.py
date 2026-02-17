@@ -78,3 +78,43 @@ def _call_groq(prompt: str) -> str:
     if not response.choices or not response.choices[0].message.content:
         return "No response from model."
     return response.choices[0].message.content.strip()
+
+
+def chat_with_groq(user_message: str, history: list = None, well_name: str = None) -> str:
+    """
+    Chat with Groq LLM. Optional conversation history and well context.
+    history: list of { "role": "user"|"assistant", "content": str }
+    Returns the assistant reply.
+    """
+    if not config.GROQ_API_KEY:
+        raise ValueError("GROQ_API_KEY is not set. Add it to your .env to use the chatbot.")
+
+    from groq import Groq
+
+    system_content = (
+        "You are a helpful expert in petrophysics and well log analysis. "
+        "Answer questions about well logs, LAS files, curves (e.g. GR, density, neutron, resistivity), "
+        "lithology, porosity, and formation evaluation. Be concise and professional."
+    )
+    if well_name:
+        system_content += f" The user may be asking about the current well: {well_name}."
+
+    messages = [{"role": "system", "content": system_content}]
+    if history:
+        for h in history[-10:]:  # last 10 exchanges
+            role = h.get("role")
+            content = h.get("content")
+            if role in ("user", "assistant") and content:
+                messages.append({"role": role, "content": content[:4000]})
+    messages.append({"role": "user", "content": user_message[:4000]})
+
+    client = Groq(api_key=config.GROQ_API_KEY)
+    response = client.chat.completions.create(
+        messages=messages,
+        model="llama-3.3-70b-versatile",
+        temperature=0.4,
+        max_tokens=1024,
+    )
+    if not response.choices or not response.choices[0].message.content:
+        return "I couldn't generate a response. Please try again."
+    return response.choices[0].message.content.strip()

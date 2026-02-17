@@ -7,6 +7,7 @@ import Analysis from "../components/Analysis";
 import Statistics from "../components/Statistics";
 import AIInterpretation from "../components/AIInterpretation";
 import Reports from "../components/Reports";
+import Chatbot from "../components/Chatbot";
 import { useProcessing } from "../context/ProcessingContext";
 import { useProcessLogs } from "../hooks/useProcessLogs";
 import logo from "../assets/logo.png";
@@ -30,6 +31,7 @@ export default function Dashboard() {
     { id: "statistics", label: "Statistics" },
     { id: "ai", label: "AI Interpretation" },
     { id: "reports", label: "Analysis & Reports" },
+    { id: "chatbot", label: "Chatbot" },
   ];
 
   // SIZE CONTROL VARIABLE
@@ -205,7 +207,9 @@ export default function Dashboard() {
                         ? "Deterministic statistics"
                         : tab.id === "ai"
                           ? "AI interpretation (Groq LLM)"
-                          : "Analysis & reports"
+                          : tab.id === "reports"
+                            ? "Analysis & reports"
+                            : "Chat with AI about well logs"
                   }
                   className={`
                     ${styles.button}
@@ -307,6 +311,12 @@ export default function Dashboard() {
                 wellName={displayFile.well_name}
                 fileName={displayFile.file_name}
               />
+            </div>
+            <div
+              className={`flex flex-col flex-1 min-h-0 ${viewMode !== "chatbot" ? "hidden" : ""}`}
+              aria-hidden={viewMode !== "chatbot"}
+            >
+              <Chatbot wellName={displayFile.well_name} />
             </div>
           </div>
         ) : showProcessingUI ? (

@@ -3,7 +3,7 @@ AI interpretation controller.
 """
 from flask import request
 from services.ai_service import AIService
-from services.llm_service import interpret_with_llm
+from services.llm_service import interpret_with_llm, chat_with_groq
 from utils.response_wrapper import success_response, error_response
 
 
@@ -68,6 +68,26 @@ class AIController:
             if result is None:
                 return error_response("Well not found", 404)
             return success_response(result)
+        except ValueError as e:
+            return error_response(str(e), 400)
+        except Exception as e:
+            
+            return error_response(str(e), 500)
+
+    @staticmethod
+    def chat():
+        """POST /api/ai/chat - send a message to the chatbot (Groq LLM)."""
+        data = request.get_json() or {}
+        message = (data.get("message") or "").strip()
+        history = data.get("history") or []
+        well_name = data.get("well_name")
+
+        if not message:
+            return error_response("message is required", 400)
+
+        try:
+            reply = chat_with_groq(message, history=history, well_name=well_name)
+            return success_response({"reply": reply})
         except ValueError as e:
             return error_response(str(e), 400)
         except Exception as e:
